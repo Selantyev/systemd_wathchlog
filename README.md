@@ -68,6 +68,7 @@ WantedBy=multi-user.target
 5. Запустить таймер
 
 `systemctl daemon-reload`
+
 `systemctl start sshd-accept.timer`
 
 6. Проверить содержимое лога
@@ -141,6 +142,7 @@ WantedBy=multi-user.target
 5. Запустить сервис
 
 `systemctl daemon-reload`
+
 `systemctl start spawn-fcgi.service`
 
 6. Проверить статус сервиса
@@ -190,4 +192,89 @@ WantedBy=multi-user.target
            └─1317 /usr/bin/php-cgi
 
 Dec 22 11:34:20 centos8 systemd[1]: Started Spawn-fcgi startup service.
+```
+
+**Запуск apache с несколькими инстансами с разными конфигами**
+
+1. Отредактируем юнит
+
+`vi /usr/lib/systemd/system/httpd.service`
+
+```
+[Unit]
+Description=The Apache HTTP Server
+Wants=httpd-init.service
+After=network.target remote-fs.target nss-lookup.target httpd-init.service
+Documentation=man:httpd.service(8)
+
+[Service]
+Type=notify
+Environment=LANG=C
+EnvironmentFile=/etc/sysconfig/httpd-%I
+
+ExecStart=/usr/sbin/httpd $OPTIONS -DFOREGROUND
+ExecReload=/usr/sbin/httpd $OPTIONS -k graceful
+# Send SIGWINCH for graceful stop
+KillSignal=SIGWINCH
+KillMode=mixed
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
+# /usr/lib/systemd/system/httpd.service.d/php-fpm.conf
+[Unit]
+Wants=php-fpm.service
+```
+
+2. Создадим два файла окружения для запуска httpd с разными конфигами
+
+`vi /etc/sysconfig/httpd-first`
+
+```
+# /etc/sysconfig/httpd-first
+OPTIONS=-f conf/first.conf
+```
+
+`vi /etc/sysconfig/httpd-second`
+
+```
+# /etc/sysconfig/httpd-first
+OPTIONS=-f conf/second.conf
+```
+
+3. Создадим два конфига https
+
+`cp /etc/httpd/conf/httpd.conf /etc/httpd/conf/first.conf`
+
+`cp /etc/httpd/conf/httpd.conf /etc/httpd/conf/second.conf`
+
+4. В second.conf изменим порт и добавим пид
+
+`vi /etc/httpd/conf/second.conf`
+
+```
+Listen 8080
+PidFile /var/run/httpd-second.pid
+```
+
+5. Запустим сервисы
+
+`systemctl start httpd@first`
+
+`systemctl start httpd@second`
+
+6. Проверим порты
+
+`netstat -tulpn`
+
+```
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN      9261/httpd
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      9008/httpd
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      907/sshd
+tcp6       0      0 :::22                   :::*                    LISTEN      907/sshd
+udp        0      0 127.0.0.1:323           0.0.0.0:*                           859/chronyd
+udp6       0      0 ::1:323                 :::*                                859/chronyd
 ```
